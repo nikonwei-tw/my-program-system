@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 import os
 
-st.set_page_config(page_title="學分學程導航系統", layout="wide")
+st.set_page_config(page_title="學分學程查詢系統", layout="wide")
 
+# --- 1. 資料讀取 ---
 @st.cache_data
 def load_all_data(file_path):
     try:
@@ -23,66 +24,80 @@ else:
     st.error("找不到 master_data.xlsx")
     st.stop()
 
-tab_browse, tab_smart_search = st.tabs(["📂 按學程瀏覽", "🎯 多課組合找學程"])
+# --- 2. 分頁標籤 ---
+tab_browse, tab_search = st.tabs(["📂 按學程瀏覽", "🔍 依課程反查學程"])
 
-# --- TAB 1: 原有的瀏覽功能 ---
+# --- TAB 1: 按學程瀏覽 ---
 with tab_browse:
     st.header("學分學程規範查詢")
-    # ... (此處保留之前的篩選與顯示邏輯，維持原樣即可) ...
-    # 為了簡潔，這裡省略重複代碼，請延用上一版的 Tab 1 內容
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        college_list = ["全部"] + sorted(df_courses["學院"].dropna().unique().tolist())
+        sel_col = st.selectbox("選擇學院", college_list)
+    with col2:
+        temp_p = df_courses if sel_col == "全部" else df_courses[df_courses["學院"] == sel_col]
+        prog_list = sorted(temp_p["學程名稱"].dropna().unique().tolist())
+        sel_prog = st.selectbox("選擇學程", prog_list)
+    with col3:
+        year_list = sorted(df_courses[df_courses["學程名稱"]==sel_prog]["適用年度"].unique(), reverse=True)
+        sel_year = st.selectbox("選擇年度", year_list)
 
-# --- TAB 2: 多課程組合搜尋 (新功能) ---
-with tab_smart_search:
-    st.header("🎯 尋找我的命定學程")
-    st.markdown("請輸入您**已經修過**或**有興趣**的課程名稱（多門課請用 `逗號` 分隔）：")
+    # 顯示畢業門檻與列表
+    summary = df_summary[(df_summary["學程名稱"] == sel_prog) & (df_summary["適用年度"] == sel_year)]
+    if not summary.empty:
+        s = summary.iloc[0]
+        st.success(f"🎓 **畢業門檻：** 必修 {s.get('必修總學分',0)} / 選修 {s.get('選修總學分',0)} / 總計 {s.get('總計應修學分',0)} 學分")
     
-    # 輸入範例：微積分, 程式設計, 統計學
-    user_input = st.text_area("課程名稱輸入區", placeholder="例如：微積分, 程式設計, 數據分析", help="輸入越多，推薦越精準！")
+    res_df = df_courses[(df_courses["學程名稱"] == sel_prog) & (df_courses["適用年度"] == sel_year)]
+    st.subheader("📋 完整應修科目表")
+    st.dataframe(res_df[['科目類別', '課程代碼', '課程名稱', '學分數', '課程認抵範圍']], use_container_width=True, hide_index=True)
+
+
+# --- TAB 2: 依課程反查學程 (關鍵功能更新) ---
+with tab_search:
+    st.header("🔍 搜尋課程找學程")
+    course_query = st.text_input("📝 請輸入課程名稱或代碼 (例如：微積分)", "")
     
-    if user_input:
-        # 1. 處理輸入的關鍵字
-        keywords = [k.strip() for k in user_input.replace("，", ",").split(",") if k.strip()]
+    if course_query:
+        # 1. 搜尋包含該課程的學程
+        search_results = df_courses[
+            df_courses["課程名稱"].str.contains(course_query, case=False, na=False) |
+            df_courses["課程代碼"].str.contains(course_query, case=False, na=False)
+        ].copy()
         
-        if keywords:
-            # 2. 在全域資料中搜尋匹配的行
-            # 建立一個正則表達式，例如 "微積分|程式設計|統計學"
-            pattern = "|".join(keywords)
-            matched_courses = df_courses[
-                df_courses["課程名稱"].str.contains(pattern, case=False, na=False)
-            ].copy()
+        if not search_results.empty:
+            # 2. 顯示簡易搜尋結果表格
+            st.write(f"以下學程包含「{course_query}」：")
+            mini_df = search_results[['學院', '學程名稱', '適用年度', '科目類別']].drop_duplicates()
+            st.dataframe(mini_df, use_container_width=True, hide_index=True)
             
-            if not matched_courses.empty:
-                # 3. 計算每個學程的命中門數
-                # 以「學程名稱」與「適用年度」分組統計
-                recommend_df = matched_courses.groupby(['學院', '學程名稱', '適用年度']).agg({
-                    '課程名稱': lambda x: ", ".join(x.unique()), # 列出命中的課名
-                    '學分數': 'sum',                             # 累計命中的學分
-                    '課程代碼': 'count'                          # 計算命中的門數
-                }).reset_index()
+            st.divider()
+            
+            # 3. 提供下拉選單讓使用者「點選」感興趣的學程詳情
+            st.subheader("📖 查看完整學程資訊")
+            # 建立選項清單： "學程名稱 (年度)"
+            options = mini_df.apply(lambda x: f"{x['學程名稱']} ({x['適用年度']})", axis=1).tolist()
+            selected_option = st.selectbox("請選擇上方搜尋結果中的學程，以查看完整應修科目：", ["--- 請選擇 ---"] + options)
+            
+            if selected_option != "--- 請選擇 ---":
+                # 解析出名稱與年度
+                p_name = selected_option.split(" (")[0]
+                p_year = selected_option.split(" (")[1].replace(")", "")
                 
-                recommend_df = recommend_df.rename(columns={'課程代碼': '命中門數', '課程名稱': '包含的相關課程'})
+                # 抓取該學程的完整資料
+                detail_df = df_courses[(df_courses["學程名稱"] == p_name) & (df_courses["適用年度"] == p_year)]
+                detail_summary = df_summary[(df_summary["學程名稱"] == p_name) & (df_summary["適用年度"] == p_year)]
                 
-                # 4. 排序：命中門數越多、學分越多的排前面
-                recommend_df = recommend_df.sort_values(by=['命中門數', '學分數'], ascending=False)
-                
-                st.success(f"根據您的課程組合，我們為您推薦以下學程：")
-                
-                # 5. 顯示推薦排行榜
-                for index, row in recommend_df.iterrows():
-                    with st.expander(f"🏆 推薦第 {index+1} 名：{row['學程名稱']} ({row['適用年度']}年度) - 命中 {row['命中門數']} 門課"):
-                        c1, c2 = st.columns([1, 2])
-                        with c1:
-                            st.metric("累計可抵免學分", f"{int(row['學分數'])} 學分")
-                        with c2:
-                            st.write(f"**已包含課程：** {row['包含的相關課程']}")
-                            
-                        # 加一個按鈕連動回 Tab 1 (提示性質)
-                        st.caption(f"提示：您可以切換到『按學程瀏覽』分頁，詳細查看『{row['學程名稱']}』的完整規範。")
-                
-                st.divider()
-                st.write("### 🔍 詳細比對清單")
-                st.dataframe(recommend_df, use_container_width=True, hide_index=True)
-            else:
-                st.warning("查無匹配的學程，請嘗試縮短關鍵字（例如用『微積』代替『微積分一』）。")
-    else:
-        st.info("💡 **操作小技巧：**\n嘗試輸入您大一、大二修過的必修課，看看是否已經不知不覺快拿到某個學程的證書了！")
+                # 顯示詳細資訊卡片
+                with st.expander(f"📌 {selected_option} 完整應修科目表", expanded=True):
+                    if not detail_summary.empty:
+                        ds = detail_summary.iloc[0]
+                        st.info(f"**畢業門檻：** 必修 {ds.get('必修總學分',0)} / 選修 {ds.get('選修總學分',0)} / 總計 {ds.get('總計應修學分',0)} 學分")
+                    
+                    # 必選修分表顯示
+                    st.write("**必修科目**")
+                    st.table(detail_df[detail_df["科目類別"]=="必修"][['課程代碼', '課程名稱', '學分數']])
+                    st.write("**選修科目**")
+                    st.table(detail_df[detail_df["科目類別"]=="選修"][['課程代碼', '課程名稱', '學分數']])
+        else:
+            st.warning("查無相關課程。")
