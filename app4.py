@@ -63,7 +63,7 @@ with tab_browse:
     summary = df_summary[(df_summary["學程名稱"] == sel_prog) & (df_summary["適用年度"] == sel_year)]
     if not summary.empty:
         s = summary.iloc[0]
-        st.success(f"🎓 **畢業門檻：** 必修 {s.get('必修總學分',0)} / 選修 {s.get('選修總學分',0)} / 總計 {s.get('總計應修學分',0)} 學分")
+        st.success(f"🎓 **應修學分：** 必修 {s.get('必修總學分',0)} / 選修 {s.get('選修總學分',0)} / 總計 {s.get('總計應修學分',0)} 學分")
         if pd.notna(s.get('備註 (模組要求)')):
             st.info(f"💡 **備註：** {s['備註 (模組要求)']}")
     
@@ -108,7 +108,7 @@ with tab_search:
                 with st.expander(f"📌 {selected_option} 完整應修科目表", expanded=True):
                     if not detail_summary.empty:
                         ds = detail_summary.iloc[0]
-                        st.info(f"**畢業門檻：** 必修 {ds.get('必修總學分',0)} / 選修 {ds.get('選修總學分',0)} / 總計 {ds.get('總計應修學分',0)} 學分")
+                        st.info(f"**應修學分：** 必修 {ds.get('必修總學分',0)} / 選修 {ds.get('選修總學分',0)} / 總計 {ds.get('總計應修學分',0)} 學分")
                     
                     # 顯示完整表格（包含所有詳細欄位與規則提醒）
                     st.dataframe(detail_df[DISPLAY_COLS], use_container_width=True, hide_index=True)
