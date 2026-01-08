@@ -17,10 +17,8 @@ def load_all_data(file_path):
         # --- 自動產生「規則提醒」欄位 ---
         def format_rules(row):
             rules = []
-            # 檢查選修群組
             if pd.notna(row.get('選修群組')) and str(row['選修群組']).strip() != "":
                 rules.append(f"📦 {row['選修群組']} ({row.get('群組要求', '無要求')})")
-            # 檢查互斥代碼
             if pd.notna(row.get('互斥代碼')) and str(row['互斥代碼']).strip() != "":
                 rules.append(f"⚠️ 互斥代碼: {row['互斥代碼']}")
             return " / ".join(rules) if rules else "-"
@@ -41,7 +39,7 @@ else:
     st.error("找不到 master_data.xlsx，請確認檔案已上傳至 GitHub。")
     st.stop()
 
-# 定義要顯示的欄位清單
+# 定義完整顯示的欄位清單
 DISPLAY_COLS = ['科目類別', '課程代碼', '課程名稱', '學分數', '課程認抵範圍', '規則提醒']
 
 # --- 2. 分頁標籤 ---
@@ -62,7 +60,6 @@ with tab_browse:
         year_list = sorted(df_courses[df_courses["學程名稱"]==sel_prog]["適用年度"].unique(), reverse=True)
         sel_year = st.selectbox("3. 選擇年度", year_list, key="b3")
 
-    # 顯示畢業門檻
     summary = df_summary[(df_summary["學程名稱"] == sel_prog) & (df_summary["適用年度"] == sel_year)]
     if not summary.empty:
         s = summary.iloc[0]
@@ -70,33 +67,34 @@ with tab_browse:
         if pd.notna(s.get('備註 (模組要求)')):
             st.info(f"💡 **備註：** {s['備註 (模組要求)']}")
     
-    # 顯示科目列表
     res_df = df_courses[(df_courses["學程名稱"] == sel_prog) & (df_courses["適用年度"] == sel_year)]
     st.subheader("📋 完整應修科目表")
     st.dataframe(res_df[DISPLAY_COLS], use_container_width=True, hide_index=True)
 
 
-# --- TAB 2: 依課程反查學程 ---
+# --- TAB 2: 依課程反查學程 (已簡化列表) ---
 with tab_search:
     st.header("🔍 搜尋課程找學程")
     course_query = st.text_input("📝 請輸入課程名稱或代碼 (例如：微積分)", "", key="s1")
     
     if course_query:
-        # 1. 搜尋包含該課程的學程
+        # 搜尋包含該課程的學程
         search_results = df_courses[
             df_courses["課程名稱"].str.contains(course_query, case=False, na=False) |
             df_courses["課程代碼"].str.contains(course_query, case=False, na=False)
         ].copy()
         
         if not search_results.empty:
-            st.write(f"以下學程包含「{course_query}」：")
-            mini_df = search_results[['學院', '學程名稱', '適用年度', '科目類別', '規則提醒']].drop_duplicates()
+            st.write(f"以下學程包含關鍵字「{course_query}」：")
+            # --- 簡化後的列表：僅顯示學院、學程名稱、適用年度 ---
+            mini_df = search_results[['學院', '學程名稱', '適用年度']].drop_duplicates()
             st.dataframe(mini_df, use_container_width=True, hide_index=True)
             
             st.divider()
             
-            # 2. 點選查看詳情
+            # 點選查看詳情
             st.subheader("📖 查看該學程完整資訊")
+            # 建立選項清單
             options = mini_df.apply(lambda x: f"{x['學程名稱']} ({x['適用年度']})", axis=1).unique().tolist()
             selected_option = st.selectbox("請選擇上方搜尋結果中的學程：", ["--- 請選擇 ---"] + options, key="s2")
             
@@ -112,7 +110,7 @@ with tab_search:
                         ds = detail_summary.iloc[0]
                         st.info(f"**畢業門檻：** 必修 {ds.get('必修總學分',0)} / 選修 {ds.get('選修總學分',0)} / 總計 {ds.get('總計應修學分',0)} 學分")
                     
-                    # 顯示完整表格，包含「規則提醒」
+                    # 顯示完整表格（包含所有詳細欄位與規則提醒）
                     st.dataframe(detail_df[DISPLAY_COLS], use_container_width=True, hide_index=True)
         else:
             st.warning("查無相關課程。")
