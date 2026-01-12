@@ -19,18 +19,15 @@ st.markdown("""
         border-radius: 10px; padding: 20px; margin-bottom: 15px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    /* 基礎方框樣式 */
     .module-summary-box {
         border-radius: 8px; padding: 10px 15px; margin: 8px 0;
         display: flex; justify-content: space-between; align-items: center;
         font-weight: bold;
     }
-    /* 達標 (綠色) */
     .status-done {
         background-color: #d4edda; color: #155724;
         border-left: 6px solid #28a745;
     }
-    /* 未達標 (灰色) */
     .status-pending {
         background-color: #f1f3f5; color: #495057;
         border-left: 6px solid #adb5bd;
@@ -68,11 +65,9 @@ def load_all_data(file_path):
 
 # --- 3. 輔助功能 ---
 def parse_required_credits(mod_name):
-    """解析模組名稱中的括號數字，如 '選修模組(10)' -> 10.0"""
+    """解析模組名稱中的括號數字，例如 '選修模組(10)' -> 10.0"""
     match = re.search(r'\((\d+\.?\d*)\)', mod_name)
-    if match:
-        return float(match.group(1))
-    return 0.0
+    return float(match.group(1)) if match else 0.0
 
 def reset_filters():
     st.session_state.b1 = "全部"
@@ -104,7 +99,7 @@ else:
 
 tab_browse, tab_search, tab_audit = st.tabs(["📂 按學程瀏覽", "🔍 依課程反查學程", "🎓 學程完成度自動比對"])
 
-# --- TAB 1 & 2 (保持原有功能不變) ---
+# --- TAB 1 & 2 保持不變 ---
 with tab_browse:
     if "b1" not in st.session_state: st.session_state.b1 = "全部"
     c_b1, c_b2, c_b3, c_res = st.columns([2, 2, 2, 1])
@@ -117,15 +112,15 @@ with tab_browse:
         sel_year = st.selectbox("3. 選擇年度", year_list)
     with c_res:
         st.markdown("<br>", unsafe_allow_html=True)
-        st.button("🔄 重設篩選", on_click=reset_filters, use_container_width=True)
+        st.button("🔄 重設篩選", on_click=reset_filters)
     
     prog_data = df_courses[(df_courses["學程名稱"] == sel_prog) & (df_courses["適用年度"] == sel_year)]
     sum_row = df_summary[(df_summary["學程名稱"] == sel_prog) & (df_summary["適用年度"] == sel_year)]
     if not sum_row.empty:
         s = sum_row.iloc[0]
-        st.success(f"**畢業門檻：** 必修 {s.get('必修總學分',0)} / 選修 {s.get('選修總學分',0)} / 總計 {s.get('總計應修學分',0)} 學分")
+        st.success(f"**畢業門檻：** 總計 {s.get('總計應修學分',0)} 學分")
         note = s.get('備註 (模組要求)', '')
-        if pd.notna(note) and str(note).strip(): st.markdown(f'<div class="note-box"><b>📝 備註：</b><br>{note}</div>', unsafe_allow_html=True)
+        if pd.notna(note) and str(note).strip(): st.markdown(f'<div class="note-box">{note}</div>', unsafe_allow_html=True)
     
     for cat in ["必修", "選修"]:
         cat_df = prog_data[prog_data["科目類別"] == cat]
@@ -140,12 +135,12 @@ with tab_browse:
 with tab_search:
     query = st.text_input("📝 請輸入關鍵字搜尋課程")
     if query:
-        res = df_courses[df_courses["課程名稱"].str.contains(query, case=False, na=False) | df_courses["課程代碼"].str.contains(query, case=False, na=False)]
+        res = df_courses[df_courses["課程名稱"].str.contains(query, case=False, na=False)]
         st.dataframe(res[['學院', '學程名稱', '適用年度', '課程代碼', '課程名稱']].drop_duplicates(), use_container_width=True, hide_index=True)
 
-# --- TAB 3: 修改重點 - 解析模組進度與達標顏色 ---
+# --- TAB 3: 修改重點 (修復分析失敗問題) ---
 with tab_audit:
-    st.header("🎓 學程達成度全局排行")
+    st.header("🎓 學程達成度排行")
     uploaded_file = st.file_uploader("請上傳您的成績單 (Excel)", type=["xlsx"])
 
     if uploaded_file:
@@ -163,7 +158,10 @@ with tab_audit:
                 p_courses = df_courses[(df_courses['學程名稱'] == p_name) & (df_courses['適用年度'] == p_year)].copy()
                 if p_courses.empty: continue
                 
+                # 比對課程
                 p_courses['已完成'] = p_courses.apply(lambda r: check_course_completion(r, passed_df), axis=1)
+                
+                # 計算總學分
                 total_done = p_courses[p_courses['已完成']]['學分數'].sum()
                 goal_total = float(p_sum_row['總計應修學分'])
                 pct = min(total_done / goal_total, 1.0) if goal_total > 0 else 0.0
@@ -175,6 +173,7 @@ with tab_audit:
                     "details": p_courses
                 })
 
+            # 排序：百分比高到低
             audit_results.sort(key=lambda x: x['pct'], reverse=True)
 
             for res in audit_results:
@@ -185,27 +184,31 @@ with tab_audit:
                     col_p.markdown(f"### {int(res['pct']*100)}%")
                     st.progress(res['pct'])
                     
-                    with st.expander(f"🔍 達成明細 (總進度：{int(res['done'])}/{int(res['goal'])})"):
+                    with st.expander(f"🔍 查看明細 (目前總計：{int(res['done'])} / {int(res['goal'])} 學分)"):
                         if pd.notna(res['note']) and str(res['note']).strip():
-                            st.info(f"📌 **規則說明：** {res['note']}")
+                            st.info(f"📌 **規範說明：** {res['note']}")
                         
+                        # 按模組分組
                         for mod_name in res['details']['模組名稱'].unique():
                             mod_data = res['details'][res['details']['模組名稱'] == mod_name]
-                            mod_done = mod_data[mod_data['學分數'][mod_data['已完成']].index].sum() # 修正：僅計算已完成學分
-                            mod_done = mod_data[mod_data['已完成']]['學分數'].sum()
                             
-                            # 解析要求學分
+                            # 正確計算該模組已獲得的學分
+                            mod_done = mod_data.loc[mod_data['已完成'], '學分數'].sum()
+                            
+                            # 解析目標學分
                             req_credits = parse_required_credits(mod_name)
                             
-                            # 【判定邏輯】：已獲學分 >= 要求學分 且 要求學分 > 0 才是真正達標 (綠色)
+                            # 判定是否達標 (只有已獲學分 >= 括號內數字才變綠色)
                             is_satisfied = (mod_done >= req_credits) if req_credits > 0 else (mod_done > 0)
                             
                             status_class = "status-done" if is_satisfied else "status-pending"
                             status_icon = "✅" if is_satisfied else "⌛"
                             
-                            # 顯示進度文字
-                            progress_text = f"已達標 ({int(mod_done)}/{int(req_credits)})" if is_satisfied else f"未完成 ({int(mod_done)}/{int(req_credits)})"
-                            if req_credits == 0: progress_text = f"已獲 {int(mod_done)} 學分"
+                            # 顯示文字：若未達標則顯示完成度
+                            if req_credits > 0:
+                                progress_text = f"{'已達標' if is_satisfied else '未達成'} ({int(mod_done)} / {int(req_credits)})"
+                            else:
+                                progress_text = f"已獲得 {int(mod_done)} 學分"
 
                             st.markdown(f"""
                                 <div class="module-summary-box {status_class}">
