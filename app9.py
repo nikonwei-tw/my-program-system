@@ -13,7 +13,9 @@ st.markdown("""
     .module-card {
         background-color: #f8f9fa; border-radius: 10px; padding: 18px;
         margin-bottom: 20px; border-left: 6px solid #007bff;
+        box-shadow: 2px 2px 8px rgba(0,0,0,0.08);
     }
+    .module-title { color: #0056b3; font-weight: bold; font-size: 1.15rem; margin-bottom: 5px; }
     .prog-container {
         background-color: #ffffff; border: 1px solid #e0e0e0;
         border-radius: 10px; padding: 20px; margin-bottom: 15px;
@@ -31,6 +33,10 @@ st.markdown("""
     .status-pending {
         background-color: #f1f3f5; color: #495057;
         border-left: 6px solid #adb5bd;
+    }
+    .note-box {
+        background-color: #fff3cd; border-left: 5px solid #ffc107;
+        padding: 12px; margin: 10px 0; font-size: 0.9rem; color: #856404;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -56,10 +62,11 @@ def load_all_data(file_path):
         
         return df_courses, df_summary, prog_map
     except Exception as e:
-        st.error(f"讀取失敗：{e}"); st.stop()
+        st.error(f"讀取資料失敗：{e}"); st.stop()
 
 # --- 3. 核心工具函數 ---
 def parse_required_credits(mod_name):
+    """提取模組名稱括號中的數字，如 '必修模組(8)' -> 8.0"""
     match = re.search(r'\((\d+\.?\d*)\)', mod_name)
     return float(match.group(1)) if match else 0.0
 
@@ -73,7 +80,10 @@ def check_course_completion(req_row, passed_df):
     matches = passed_df[passed_df['課程代碼'].str.strip() == str(req_row['課程代碼']).strip()]
     return not matches.empty
 
-# --- 4. 主程式執行 ---
+def reset_filters():
+    st.session_state.b1 = "全部"
+
+# --- 4. 執行流程 ---
 DATA_FILE = "master_data.xlsx"
 if os.path.exists(DATA_FILE):
     df_courses, df_summary, prog_map = load_all_data(DATA_FILE)
@@ -82,8 +92,54 @@ else:
 
 tab_browse, tab_search, tab_audit = st.tabs(["📂 按學程瀏覽", "🔍 依課程反查學程", "🎓 學程完成度自動比對"])
 
-# (Tab 1 & 2 程式碼維持原樣，此處略過以節省空間)
+# --- TAB 1: 按學程瀏覽 ---
+with tab_browse:
+    if "b1" not in st.session_state: st.session_state.b1 = "全部"
+    c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+    with c1: 
+        sel_col = st.selectbox("1. 選擇學院", ["全部"] + sorted(df_courses["學院"].dropna().unique().tolist()), key="b1")
+    with c2:
+        temp_p = df_courses if sel_col == "全部" else df_courses[df_courses["學院"] == sel_col]
+        sel_prog = st.selectbox("2. 選擇學程", sorted(temp_p["學程名稱"].dropna().unique().tolist()))
+    with c3:
+        year_list = sorted(df_courses[df_courses["學程名稱"]==sel_prog]["適用年度"].unique(), reverse=True)
+        sel_year = st.selectbox("3. 選擇年度", year_list)
+    with c4:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.button("🔄 重設", on_click=reset_filters)
+    
+    prog_data = df_courses[(df_courses["學程名稱"] == sel_prog) & (df_courses["適用年度"] == sel_year)]
+    sum_row = df_summary[(df_summary["學程名稱"] == sel_prog) & (df_summary["適用年度"] == sel_year)]
+    
+    if not sum_row.empty:
+        s = sum_row.iloc[0]
+        st.success(f"**門檻要求：** 必修 {s.get('必修總學分',0)} / 選修 {s.get('選修總學分',0)} / 總計 {s.get('總計應修學分',0)} 學分")
+        note = s.get('備註 (模組要求)', '')
+        if pd.notna(note) and str(note).strip(): 
+            st.markdown(f'<div class="note-box"><b>📝 備註：</b><br>{note}</div>', unsafe_allow_html=True)
+    
+    for cat in ["必修", "選修"]:
+        cat_df = prog_data[prog_data["科目類別"] == cat]
+        if not cat_df.empty:
+            st.subheader(f"📍 {cat}課程")
+            for mod in cat_df["模組名稱"].unique():
+                mod_df = cat_df[cat_df["模組名稱"] == mod]
+                st.markdown(f'<div class="module-card"><div class="module-title">🔹 {mod}</div>', unsafe_allow_html=True)
+                st.dataframe(mod_df[['課程代碼', '課程名稱', '學分數', '課程認抵範圍', '備註']], use_container_width=True, hide_index=True)
+                st.markdown('</div>', unsafe_allow_html=True)
 
+# --- TAB 2: 依課程反查學程 ---
+with tab_search:
+    st.header("🔍 依課程名稱反查所屬學程")
+    query = st.text_input("請輸入課程關鍵字 (例如：微積分)")
+    if query:
+        search_res = df_courses[df_courses["課程名稱"].str.contains(query, case=False, na=False)]
+        if not search_res.empty:
+            st.dataframe(search_res[['學院', '學程名稱', '適用年度', '科目類別', '課程代碼', '課程名稱']].drop_duplicates(), use_container_width=True, hide_index=True)
+        else:
+            st.warning("查無相關課程。")
+
+# --- TAB 3: 學程完成度自動比對 (結構化計算修正) ---
 with tab_audit:
     st.header("🎓 學程達成度排行 (模組結構化計算)")
     uploaded_file = st.file_uploader("上傳您的成績單 Excel", type=["xlsx"])
@@ -103,7 +159,7 @@ with tab_audit:
                 p_courses = df_courses[(df_courses['學程名稱'] == p_name) & (df_courses['適用年度'] == p_year)].copy()
                 if p_courses.empty: continue
                 
-                # 1. 基礎完成判定與互斥處理
+                # 1. 完成判定與互斥處理
                 p_courses['已完成'] = p_courses.apply(lambda r: check_course_completion(r, passed_df), axis=1)
                 p_courses['採計學分'] = p_courses['學分數']
                 p_courses['互斥標記'] = ""
@@ -117,7 +173,7 @@ with tab_audit:
                         else:
                             used_mutex.add(mutex)
 
-                # 2. 模組權重計算 (修正點：總進度 = 各模組達成百分比之平均)
+                # 2. 結構化百分比計算：(模組 A 達成% + 模組 B 達成% ...) / 模組總數
                 mod_list = p_courses['模組名稱'].unique()
                 total_mod_pct = 0
                 for mod in mod_list:
@@ -127,7 +183,7 @@ with tab_audit:
                     
                     if mod_req > 0:
                         total_mod_pct += min(mod_done / mod_req, 1.0)
-                    else: # 若模組沒寫學分要求，只要有修就算該模組 100%
+                    else:
                         total_mod_pct += 1.0 if mod_done > 0 else 0.0
                 
                 final_pct = total_mod_pct / len(mod_list) if len(mod_list) > 0 else 0.0
@@ -150,7 +206,7 @@ with tab_audit:
                     col_p.markdown(f"### {int(res['pct']*100)}%")
                     st.progress(res['pct'])
                     
-                    with st.expander(f"🔍 達成明細 (結構化完成度：{int(res['pct']*100)}%)"):
+                    with st.expander(f"🔍 查看明細 (結構化完成度：{int(res['pct']*100)}%)"):
                         for mod_name in res['details']['模組名稱'].unique():
                             mod_data = res['details'][res['details']['模組名稱'] == mod_name]
                             mod_done = mod_data.loc[mod_data['已完成'], '採計學分'].sum()
